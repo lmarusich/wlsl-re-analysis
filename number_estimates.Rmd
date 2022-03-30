@@ -1,0 +1,114 @@
+---
+title: "number estimates"
+author: "Laura"
+date: "4/21/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyr)
+library(dplyr)
+library(plotrix)
+```
+
+## Error in number estimates by subject
+
+
+```{r fig.width=8, fig.height=4}
+numdat <- read.csv("numdat.csv")
+
+numdat <- numdat %>%
+  mutate(iscorrect = ifelse(stim_number == subject_estimate, 1, 0))
+
+##look at boxplots of all 16 subjects
+boxplot(numdat$estimate_err ~ numdat$subject)
+
+##take out sub15
+filterednum <- numdat %>% dplyr::filter(subject != "sub15")
+boxplot(filterednum$estimate_err ~ filterednum$subject)
+
+##take out sub2
+filterednum <- filterednum %>% dplyr::filter(subject != "sub2")
+boxplot(filterednum$estimate_err ~ filterednum$subject)
+
+##take out sub3
+filterednum <- filterednum %>% dplyr::filter(subject != "sub3")
+boxplot(filterednum$estimate_err ~ filterednum$subject)
+
+##now remove individual estimates with |errors| > 12 (assuming people just messed up occasionally)
+filterednum <- filterednum %>% dplyr::filter(abs(estimate_err) < 12)
+boxplot(filterednum$estimate_err ~ filterednum$subject)
+
+
+# & subject != "sub2"& subject != "sub3") %>%
+#   filter(abs(estimate_err) < 12)
+```
+
+## Seems reasonable. Now look by condition and distance
+
+```{r}
+abs_err_means <- filterednum %>%
+  select(subject,condition, stim_distance, estimate_err) %>%
+  mutate(abs_err = abs(estimate_err)) %>%
+  pivot_wider(names_from = stim_distance, values_from = abs_err, values_fn = mean, id_cols = c(subject,condition)) %>%
+  dplyr::select(subject, condition, `15`,`25`,`50`,`75`,`100`,`150`,`200`)
+print(abs_err_means)
+plot(colMeans(abs_err_means[ , 3:9]), ylim = c(0,.6), type = "o", xlab = "Distance (increasing)", ylab = "Abs error in number estimate")
+##just doing std error for quick look
+ses <- apply(abs_err_means[ , 3:9], 2, std.error)
+arrows(x0 = 1:7, y0 = colMeans(abs_err_means[ , 3:9]) - ses, y1 = colMeans(abs_err_means[ , 3:9]) + ses,
+       code = 3, angle = 90, length = .1)
+```
+
+## Look at just WL condition
+
+```{r}
+
+
+filtered_abs_err_means <- abs_err_means %>%
+  filter(condition == "WL")
+print(filtered_abs_err_means)
+plot(colMeans(filtered_abs_err_means[ , 3:9]), ylim = c(0,.45), type = "o", xlab = "Distance (increasing)", ylab = "Abs error in number estimate")
+##just doing std error for quick look
+ses <- apply(filtered_abs_err_means[ , 3:9], 2, std.error)
+arrows(x0 = 1:7, y0 = colMeans(filtered_abs_err_means[ , 3:9]) - ses, y1 = colMeans(filtered_abs_err_means[ , 3:9]) + ses,
+       code = 3, angle = 90, length = .1)
+```
+## Look at % correct instead
+
+```{r}
+filtered_pcts <- numdat %>% 
+  filter(subject != "sub15" & subject != "sub2"& subject != "sub3")
+
+pct_means <- filtered_pcts %>%
+  select(subject,condition, stim_distance, iscorrect) %>%
+  pivot_wider(names_from = stim_distance, values_from = iscorrect, values_fn = mean, id_cols = c(subject,condition)) %>%
+  dplyr::select(subject, condition, `15`,`25`,`50`,`75`,`100`,`150`,`200`)
+print(pct_means)
+plot(colMeans(pct_means[ , 3:9]), ylim = c(0,1), type = "o", xlab = "Distance (increasing)", ylab = "Percent correct number estimates")
+##just doing std error for quick look
+ses <- apply(pct_means[ , 3:9], 2, std.error)
+arrows(x0 = 1:7, y0 = colMeans(pct_means[ , 3:9]) - ses, y1 = colMeans(pct_means[ , 3:9]) + ses,
+       code = 3, angle = 90, length = .1)
+
+SL_pct_means <- pct_means %>%
+  filter(condition == "SL")
+print(SL_pct_means)
+plot(colMeans(SL_pct_means[ , 3:9]), ylim = c(0,1), type = "o", xlab = "Distance (increasing)", ylab = "Percent correct number estimates", col = "darkgray")
+##just doing std error for quick look
+ses <- apply(SL_pct_means[ , 3:9], 2, std.error)
+arrows(x0 = 1:7, y0 = colMeans(SL_pct_means[ , 3:9]) - ses, y1 = colMeans(SL_pct_means[ , 3:9]) + ses,
+       code = 3, angle = 90, length = .1, col = "gray")
+
+WL_pct_means <- pct_means %>%
+  filter(condition == "WL")
+print(WL_pct_means)
+lines(colMeans(WL_pct_means[ , 3:9]), ylim = c(0,1), type = "o", xlab = "Distance (increasing)", ylab = "Percent correct number estimates")
+##just doing std error for quick look
+ses <- apply(WL_pct_means[ , 3:9], 2, std.error)
+arrows(x0 = 1:7, y0 = colMeans(WL_pct_means[ , 3:9]) - ses, y1 = colMeans(WL_pct_means[ , 3:9]) + ses,
+       code = 3, angle = 90, length = .1)
+
+
+```
