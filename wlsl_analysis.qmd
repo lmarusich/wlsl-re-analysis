@@ -247,7 +247,7 @@ nrow(removal_ids)
 dist_only_cleaned <- dist_only %>% 
   filter(!(subject %in% removal_ids$subject))
 
-#how many subjects per condition
+#how many trials for each participant
 dist_only_cleaned %>%
   group_by(subject, condition) %>%
   summarize(ntrials = n()) %>%
@@ -256,85 +256,46 @@ dist_only_cleaned %>%
 
 #all participants have 84 trials
 
-
-  summarize(all_84 = all(ntrials == 84))
- 
-  
-  group_by(subject, condition) %>%
-  summarize(ntrials = n()) %>%
-  group_by(condition) %>%
-  summarize(nsubs = n()) %>%
-  kable()
-
 #people with really big estimates?
-hist(dist_only2$converted_est)
-
-upper_limits <- dist_only2 %>%
-  group_by(condition) %>%
-  summarize(mean_est = mean(converted_est),
-            sd_est = sd(converted_est),
-            upper_lim = mean_est + (3 * sd_est)
-  )
-
-
-dist_only2 %>%
-  select(subject, condition, stim_distance, converted_est) %>%
-  group_by(subject, condition) %>%
-  summarize(mean_est = mean(converted_est)) %>%
-  arrange(desc(mean_est)) %>%
-  print(n=20)
-
-#only one person exceeds the threshold
-ol_id <- dist_only2 %>%
-  group_by(subject) %>%
-  summarize(mean_est = mean(converted_est)) %>%
-  slice_max(mean_est,n = 1) %>%
-  pull(subject)
-
-
-
-
-no_ol <- dist_only2 %>%
-  filter(subject != ol_id)
-
-hist(no_ol$converted_est)
-
-#outlier trials within people's datasets
-ggplot(no_ol, aes(y = converted_est, group = subject)) +
-  geom_boxplot()
+hist(dist_only_cleaned$converted_est)
 
 #we have some very large outliers, and then some negatives too (probably from people thinking they were doing orientation?)
+ggplot(dist_only_cleaned, aes(y = converted_est, group = subject)) +
+  geom_boxplot()
 
-# remove negatives
-no_ol2 <- no_ol %>% 
+#outlier trials within people's datasets
+# remove negatives (81 trials)
+no_ol <- dist_only_cleaned %>% 
   filter(converted_est >= 0)
 
 # remove obvious outliers per person
-no_ol2 %>% 
+no_ol %>% 
   group_by(subject) %>% 
   summarize(n_out = sum(converted_est > (mean(converted_est) + 3*sd(converted_est)))) %>%
   arrange(desc(n_out))
 
-no_ol3 <- no_ol2 %>%
-  group_by(subject) %>% 
-  filter(converted_est <= (mean(converted_est) + 3*sd(converted_est)))
+#30 outliers 
 
-ggplot(no_ol3, aes(y = converted_est, group = subject)) +
+no_ol2 <- no_ol %>%
+  group_by(subject) %>%
+  mutate(mean_est = mean(converted_est),
+         sd_est = sd(converted_est),
+         ul = mean_est + 3 * sd_est,
+         outlier = ifelse(converted_est > ul, T, F))
+
+#double check - still 30 outliers
+
+no_ol2 <- no_ol2 %>%
+  filter(outlier == F)
+
+ggplot(no_ol2, aes(y = converted_est, group = subject)) +
   geom_boxplot()
 
 hist(no_ol3$converted_est)
 
-#the actual maximum distance is 200m
-
-# From Mike's writeup: "From the remaining participants, we removed 6 participants whose answers were outliers (greater than 3SD above the mean response for that unique combination of experimental factors)." 
-
-
-#not sure how mike arrived at his number of outliers. from this, it sounds like he removed 44 people for having too long of runs. I only get 31. Then I'm not clear on how he's cutting off large responses
-
-
 
 #how many subjects per condition
-no_ol %>%
+no_ol2 %>%
   group_by(subject, condition) %>%
   summarize(ntrials = n()) %>%
   group_by(condition) %>%
@@ -357,7 +318,7 @@ cust_theme_classic <- function(base_size = 12)
 }
 
 # take out toggle (too cluttered)
-slwl_only <- no_ol3 %>%
+slwl_only <- no_ol2 %>%
   filter(condition != "TOGGLE")
 
 sub_mean_ests <- slwl_only %>%
