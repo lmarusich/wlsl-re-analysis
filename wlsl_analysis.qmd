@@ -1,0 +1,536 @@
+---
+title: "Analyze WL/SL Data"
+format: html
+editor: visual
+---
+
+## Setup
+
+```{r}
+#| include: false
+
+if(!require("pacman")) install.packages("pacman")
+pacman::p_load(XML, knitr, superb, tidyverse, plotrix, ggpubfigs)
+```
+
+## Read in XML Data from Volunteer Science
+
+```{r}
+#| include: false
+dat <- xmlParse("fulldata.txt")
+rootnode <- xmlRoot(dat)
+
+#how many subjects?
+nsubs <- xmlSize(rootnode)
+
+sublist <- list()
+index <- 1
+
+for (i in 1:nsubs){
+  tempnode <- xmlValue(rootnode[[i]][[2]][[1]])
+  tempdat <- read.csv(textConnection(tempnode), stringsAsFactors = F)
+  if (dim(tempdat)[1] == 0){
+    next
+  }
+  
+  sublist[[index]] <- list()
+  
+  subID <- xmlToList(rootnode[[i]][[1]])[["uid"]]
+  tempdat <- tempdat %>% mutate(subject = subID)
+  
+  sublist[[index]]$estimate <- tempdat %>%
+    filter(test_part == "estimate")
+  if (tempdat$conditiona[1] != "SL"){
+    sublist[[index]]$estimate <- sublist[[index]]$estimate %>%
+      select(!(animation_sequence:question_order))
+  }
+  
+  sublist[[index]]$demographics <- tempdat %>%
+    filter(test_part == "demographics") %>%
+    select(subject,rt,responses,test_part,conditiona,question_order)
+  
+  sublist[[index]]$freeresponse <- tempdat %>%
+    filter(test_part == "freeresponse") %>%
+    select(subject,rt,responses,test_part,conditiona, time_elapsed)
+  
+  sublist[[index]]$visibility <- tempdat %>%
+    filter(test_part == "visibility")
+  if (tempdat$conditiona[1] != "SL"){
+    sublist[[index]]$visibility <- sublist[[index]]$visibility %>%
+      select(subject,rt,test_part,animation_sequence,stimulus,key_press,order,vis_distance)
+  }
+  
+  index <- index + 1
+  
+}
+```
+
+## Clean Data
+
+```{r}
+#| include: false
+
+nsubs <- length(sublist)
+
+#make separate dataframes for each type of data (estimates, visibility, combine demographics and freeresponse)
+
+demographics <- data.frame(subject = character(nsubs),
+                           condition = character(nsubs), age = character(nsubs),
+                           gender = character(nsubs), mil = character(nsubs),
+                           leo = character(nsubs), col = character(nsubs),
+                           comments = character(nsubs), total_time = integer(nsubs),
+                           stringsAsFactors = F)
+
+for (i in 1:nsubs){
+  demographics[i,1] <- sublist[[i]]$demographics$subject[1]
+  demographics[i, 2] <- sublist[[i]]$demographics$conditiona[1]
+  tempdemo <- strsplit(sublist[[i]]$demographics$responses, ',\"')[[1]]
+  tempdemo <- sub('\\{\"Age\":\"', "", tempdemo)
+  tempdemo <- sub('Gender\":"', "", tempdemo)
+  tempdemo <- sub('Mil\":\"', "", tempdemo)
+  tempdemo <- sub('Law\":\"', "", tempdemo)
+  tempdemo <- sub('Col\":\"', "", tempdemo)
+  tempdemo <- gsub('\"', "", tempdemo)
+  tempdemo <- gsub('\\}', "", tempdemo)
+  
+  demographics[i, 3:7] <- tempdemo
+  
+  tempfreeresp <- sublist[[i]]$freeresponse$responses
+  tempfreeresp <- sub('\\{\"Q0\":\"', "", tempfreeresp)
+  tempfreeresp <- sub('\"\\}', "", tempfreeresp)
+  demographics[i, 8] <- tempfreeresp
+  demographics[i, 9] <- sublist[[i]]$freeresponse$time_elapsed
+}
+
+
+estimateDataAll <- NULL
+visDataAll <- NULL
+
+ids <- character(nsubs)
+
+for (i in 1:nsubs){
+  estimatedata <- sublist[[i]]$estimate %>%
+    select(subject, condition = conditiona, stim_distance = distance,
+           stim_heading = orientation, stim_number = number,
+           estimate_type, rt, subject_estimate = estimate, units_used, nswitches,
+           time_in_SL, time_in_WL, firstview, lastview,
+           first_instr, browserinfo, windowWidth, windowHeight)
+  
+  tempcondition <- estimatedata$condition[1]
+  
+  print(dim(estimatedata))
+  
+  if (tempcondition != "SL") {
+    visdata <- sublist[[i]]$visibility
+    visDataAll <- rbind(visDataAll, visdata)
+  }
+  
+  estimateDataAll <- rbind(estimateDataAll, estimatedata)
+  
+  ids[i] <- estimatedata$subject[1]
+}
+
+write.csv(demographics, "WLSL_demographics.csv", row.names = F)
+write.csv(estimateDataAll, "WLSL_estimate_data.csv", row.names = F)
+write.csv(visDataAll, "WLSL_visibility_test_data.csv", row.names = F)
+
+```
+
+## Data Checking
+
+```{r}
+
+#how many unique subjects
+nsubs
+length(unique(estimateDataAll$subject))
+
+#did one person do the study twice?
+estimateDataAll %>%
+  group_by(subject) %>%
+  summarize(ntrials = n()) %>%
+  arrange(desc(ntrials))
+
+#should we keep their first run?
+estimateDataAll2 <- estimateDataAll %>%
+  group_by(subject) %>%
+  slice_head(n=168) 
+
+estimateDataAll2 %>%
+  group_by(subject) %>%
+  summarize(ntrials = n()) %>%
+  arrange(desc(ntrials)) 
+
+#how many subjects per condition
+estimateDataAll2 %>%
+  group_by(subject, condition) %>%
+  summarize(ntrials = n()) %>%
+  group_by(condition) %>%
+  summarize(nsubs = n()) %>%
+  kable()
+
+#how many trials of each type
+n_of_each <- estimateDataAll2 %>%
+  group_by(subject, estimate_type, stim_distance, stim_heading, stim_number) %>%
+  summarize(ntrials = n())
+
+all(n_of_each$ntrials == 1)
+
+
+
+
+```
+
+## Remove Outliers
+
+```{r}
+
+
+
+dist_only <- estimateDataAll2 %>%
+  filter(estimate_type == "Distance") %>%
+  ungroup()
+
+#make sure all distance estimates are using the same unit??
+## convert feet to meters
+#/3.28084
+dist_only <- dist_only %>%
+  mutate(converted_est = ifelse(units_used == "feet", subject_estimate / 3.28084,subject_estimate)  )
+
+
+#estimate the relationship between estimates and true distance for each participant
+r_summary <- dist_only %>%
+  group_by(subject) %>%
+  summarize(slope = coef(lm(converted_est ~ stim_distance))[2],
+            r = cor(stim_distance, converted_est),
+            r2 = cor.test(stim_distance, converted_est)$estimate,
+            p = cor.test(stim_distance, converted_est)$p.value) %>%
+  arrange(r)
+  
+
+# dist_only %>%
+#   filter(subject == "17cf46f4fcab4671ab11") %>%
+#   ggplot(aes(x = stim_distance, y = converted_est)) +
+#   geom_point()
+# 
+# 
+# dist_only %>%
+#   group_by(subject) %>%
+#   summarize(n_negatives = sum(converted_est < 0)) %>%
+#   print(n = Inf)
+# 
+# num_runs <- dist_only %>%
+#   group_by(subject) %>%
+#   summarize(nruns = max(rle(converted_est)$lengths)) %>%
+#   arrange(desc(nruns)) %>%
+#   print(n=35)
+# 
+# long_run_ids <- num_runs %>%
+#   filter(nruns > 4) %>%
+#   pull(subject)
+# length(long_run_ids)
+# 
+# num_stim_runs <- dist_only %>%
+#   group_by(subject) %>%
+#   summarize(nruns = max(rle(stim_distance)$lengths)) %>%
+#   arrange(desc(nruns)) %>%
+#   print(n = 35)
+
+#remove people with no evidence of positive relationship between actual distance and estimated distance
+removal_ids <- r_summary %>%
+  filter(r < 0 | p > .05) %>%
+  select(subject)
+
+#removes 30 participants (less than Mike's removals based on runs)
+nrow(removal_ids)
+
+
+dist_only_cleaned <- dist_only %>% 
+  filter(!(subject %in% removal_ids$subject))
+
+#how many subjects per condition
+dist_only_cleaned %>%
+  group_by(subject, condition) %>%
+  summarize(ntrials = n()) %>%
+  group_by(ntrials) %>%
+  summarize(n = n())
+
+#all participants have 84 trials
+
+
+  summarize(all_84 = all(ntrials == 84))
+ 
+  
+  group_by(subject, condition) %>%
+  summarize(ntrials = n()) %>%
+  group_by(condition) %>%
+  summarize(nsubs = n()) %>%
+  kable()
+
+#people with really big estimates?
+hist(dist_only2$converted_est)
+
+upper_limits <- dist_only2 %>%
+  group_by(condition) %>%
+  summarize(mean_est = mean(converted_est),
+            sd_est = sd(converted_est),
+            upper_lim = mean_est + (3 * sd_est)
+  )
+
+
+dist_only2 %>%
+  select(subject, condition, stim_distance, converted_est) %>%
+  group_by(subject, condition) %>%
+  summarize(mean_est = mean(converted_est)) %>%
+  arrange(desc(mean_est)) %>%
+  print(n=20)
+
+#only one person exceeds the threshold
+ol_id <- dist_only2 %>%
+  group_by(subject) %>%
+  summarize(mean_est = mean(converted_est)) %>%
+  slice_max(mean_est,n = 1) %>%
+  pull(subject)
+
+
+
+
+no_ol <- dist_only2 %>%
+  filter(subject != ol_id)
+
+hist(no_ol$converted_est)
+
+#outlier trials within people's datasets
+ggplot(no_ol, aes(y = converted_est, group = subject)) +
+  geom_boxplot()
+
+#we have some very large outliers, and then some negatives too (probably from people thinking they were doing orientation?)
+
+# remove negatives
+no_ol2 <- no_ol %>% 
+  filter(converted_est >= 0)
+
+# remove obvious outliers per person
+no_ol2 %>% 
+  group_by(subject) %>% 
+  summarize(n_out = sum(converted_est > (mean(converted_est) + 3*sd(converted_est)))) %>%
+  arrange(desc(n_out))
+
+no_ol3 <- no_ol2 %>%
+  group_by(subject) %>% 
+  filter(converted_est <= (mean(converted_est) + 3*sd(converted_est)))
+
+ggplot(no_ol3, aes(y = converted_est, group = subject)) +
+  geom_boxplot()
+
+hist(no_ol3$converted_est)
+
+#the actual maximum distance is 200m
+
+# From Mike's writeup: "From the remaining participants, we removed 6 participants whose answers were outliers (greater than 3SD above the mean response for that unique combination of experimental factors)." 
+
+
+#not sure how mike arrived at his number of outliers. from this, it sounds like he removed 44 people for having too long of runs. I only get 31. Then I'm not clear on how he's cutting off large responses
+
+
+
+#how many subjects per condition
+no_ol %>%
+  group_by(subject, condition) %>%
+  summarize(ntrials = n()) %>%
+  group_by(condition) %>%
+  summarize(nsubs = n()) %>%
+  kable()
+
+
+```
+## Make Basic Plot
+```{r}
+
+#initial plot
+#Custom classic theme
+cust_theme_classic <- function(base_size = 12) 
+{
+  theme_classic(base_size = base_size)  %+replace%
+    theme(text = element_text(size=16),
+          plot.title = element_text(hjust = 0.5)
+    )
+}
+
+# take out toggle (too cluttered)
+slwl_only <- no_ol3 %>%
+  filter(condition != "TOGGLE")
+
+sub_mean_ests <- slwl_only %>%
+  group_by(subject, condition, stim_distance) %>%
+  summarize(sub_mean_est = mean(converted_est)) 
+
+sub_ests_plot <- sub_mean_ests %>%
+  group_by(condition, stim_distance) %>%
+  summarize(group_mean_est = mean(sub_mean_est),
+            group_n = n(),
+            group_se = std.error(sub_mean_est),
+            group_ci = qt(0.975, df = group_n - 1) * group_se) %>%
+  ggplot(aes(x = stim_distance,
+             y = group_mean_est,
+             ymin = group_mean_est - group_ci,
+             ymax = group_mean_est + group_ci,
+             group = condition,
+             color = condition)) +
+  geom_line() +
+  geom_point(size = 2) +
+  geom_errorbar(width = 4) +
+  labs(x = "Actual Distance", y = "Estimated Distance") +
+  cust_theme_classic() +
+  geom_abline(aes(intercept = 0, slope = 1), linetype = 2, color = "gray") +
+  scale_y_continuous(expand = c(0,0), limits = c(0, 200)) +
+  scale_x_continuous(expand = c(0,0), limits = c(0,210)) +
+  scale_colour_manual(values = friendly_pal("contrast_three"),
+                      labels=c('Screen-locked', 'World-locked')) +
+  theme(legend.title = element_blank(), legend.position = c(0.15, 0.9))
+
+sub_ests_plot
+
+ggsave(sub_ests_plot,
+       file = "plots/fig2_estimates_plot.jpg",
+       units = "in",
+       width = 9,
+       height = 6,
+       dpi = 600)
+
+```
+
+```{r}
+#maybe look at whether a quadratic term is a good fit for WL?
+lm1 <- lm(converted_est ~ condition*stim_distance, data = slwl_only)
+summary(lm1)
+plot_model(lm1, type = "pred", terms = c("stim_distance", "condition"))
+
+
+slwl_only <- slwl_only %>%
+  mutate(stim_dist_sq = stim_distance^2)
+
+lm2 <- lm(converted_est ~ condition + stim_distance + stim_dist_sq + condition:stim_distance + condition:stim_dist_sq, data = slwl_only)
+summary(lm2)
+plot_model(lm2, type = "pred", terms = c("stim_distance", "condition"))
+
+# timevalues <- seq(0, 30, 0.1)
+# 
+# predictedcounts <- predict(quadratic.model,list(Time=timevalues, Time2=timevalues^2))
+# 
+# plot(Time, Counts, pch=16, xlab = "Time (s)", ylab = "Counts", cex.lab = 1.3, col = "blue")
+# lines(timevalues, predictedcounts, col = "darkgreen", lwd = 3)
+
+plot(slwl_only$stim_distance, predict(lm2))
+
+ggplot(slwl_only, aes(x = stim_distance, y = converted_est, group = condition, color = condition)) +
+  # stat_smooth(method = "lm",se=F) +
+  stat_smooth(method = "lm",se=T,formula = y~poly(x,2))
+
+```
+
+## Multilevel models
+### Est dist
+```{r}
+#Sanity check: Stim distance and estimated distance with random int for participants 
+Null.dist <- lmer(converted_est ~ stim_distance + (1|subject), data = slwl_only)
+coef(Null.dist)
+summary(Null.dist)
+
+#convergence problems
+Null.dist2 <- lmer(converted_est ~ 1 + stim_distance + (1 + stim_distance|subject), 
+                   data = slwl_only)
+coef(Null.dist2)
+fixef(Null.dist2)
+ranef(Null.dist2)
+
+#Stim distance and condition
+Model1.dist.cond <- lmer(converted_est ~ stim_distance*condition + 
+                         (1|subject), data = slwl_only)
+summary(Model1.dist.cond)
+
+plot_model(Model1.dist.cond, type = "pred", terms = "stim_distance")
+plot_model(Model1.dist.cond, type = "int", terms = "condition")
+tab_model(Model1.dist.cond, show.df = TRUE)
+
+#Model comparison
+anova(Null.dist, Model1.dist.cond)
+
+
+#Stim distance^2 and condition
+Model2.dist.cond <- lmer(converted_est ~ condition + stim_distance + stim_dist_sq +
+                           condition:stim_distance + condition:stim_dist_sq +
+                         (1|subject), data = slwl_only)
+summary(Model2.dist.cond)
+
+plot_model(Model2.dist.cond, type = "pred", terms = "stim_distance")
+plot_model(Model2.dist.cond, type = "int")
+
+model3 <- lmer(converted_est ~ condition * poly(stim_distance,2) + (1|subject), data = slwl_only)
+
+
+```
+
+### Ratio
+```{r}
+#Sanity check: Stim distance and estimated distance with random int for participants 
+Null.distr <- lmer(Ratio ~ 1 + stim_distance + (1|subject), data = DdataSW)
+coef(Null.distr)
+summary(Null.distr)
+
+#Convergence probs with stimuli distance as a random effect
+#7 unique stim distance
+unique(Ddata$stim_distance)
+
+Null.dist2r <- lmer(Ratio ~ 1 + stim_distance + (1 + stim_distance|subject), data = DdataSW)
+coef(Null.dist2r)
+fixef(Null.dist2r)
+ranef(Null.dist2r)
+
+
+Null.condr <- lmer(Ratio ~ 1 + condition + (1|subject), data = DdataSW)
+summary(Null.condr)
+
+#Stim distance and condition
+Model1.dist.condr <- lmer(Ratio ~ 1 + stim_distance*condition + (1|subject), data = DdataSW)
+summary(Model1.dist.condr)
+
+plot_model(Model1.dist.condr, type = "pred", terms = "stim_distance")
+plot_model(Model1.dist.condr, type = "int", terms = "condition")
+tab_model(Model1.dist.condr, show.df = TRUE)
+
+#Model comparison
+anova(Null.distr, Null.condr, Model1.dist.condr)
+```
+
+### Absolute error
+```{r}
+#Sanity check: Stim distance and estimated distance with random int for participants 
+Null.dist.ae <- lmer(Ratio ~ 1 + stim_distance + (1|subject), data = DdataSW)
+coef(Null.dist.ae)
+summary(Null.dist.ae)
+
+#Convergence probs with stimuli distance as a random effect
+#7 unique stim distance
+unique(Ddata$stim_distance)
+
+Null.dist2.ae <- lmer(AbsoluteError ~ 1 + stim_distance + (1 + stim_distance|subject), data = DdataSW)
+coef(Null.dist2.ae)
+fixef(Null.dist2.ae)
+ranef(Null.dist2.ae)
+
+
+Null.cond.ae <- lmer(AbsoluteError ~ 1 + condition + (1|subject), data = DdataSW)
+summary(Null.cond.ae)
+
+#Stim distance and condition
+Model1.dist.cond.ae <- lmer(AbsoluteError ~ 1 + stim_distance*condition + (1|subject), data = DdataSW)
+summary(Model1.dist.cond.ae)
+
+plot_model(Model1.dist.cond.ae, type = "pred", terms = "stim_distance")
+plot_model(Model1.dist.cond.ae, type = "int", terms = "condition")
+tab_model(Model1.dist.cond.ae, show.df = TRUE)
+
+#Model comparison
+anova(Null.dist.ae, Null.cond.ae, Model1.dist.cond.ae)
+```
+

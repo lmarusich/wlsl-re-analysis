@@ -1,0 +1,170 @@
+---
+title: 'WL and SL pics: MLMs'
+output:
+  pdf_document:
+    latex_engine: xelatex
+  html_document:
+    df_print: paged
+editor_options:
+  chunk_output_type: console
+chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, tidy = FALSE)
+options(width = 100)
+
+#Get the working directory
+  workingdir <- getwd()
+  
+if(!require("pacman")) install.packages("pacman")
+pacman::p_load(knitr, rmarkdown, yaml, tidyverse, RColorBrewer, stats, parallel, 
+               fansi, rlang,  BiocManager, Hmisc, lme4, merTools, sjPlot,
+               scales, pals, viridis, lmerTest, robustlmm, arm,
+               optimParallel, renv, foreign,
+               snow #Windows only 
+               )
+
+#Set number of cpus to the number of cores 
+  num.cpus <- parallel::detectCores(logical = T)
+  options(boot.ncpus = num.cpus)
+
+#Number of cores R is using
+  getOption("boot.ncpus", 1L)
+
+#Read-in data
+#read in csv files with variable names as header
+#RTeff <- read.csv(file="RTLongCoreff.csv",header=TRUE,sep=",")
+
+# read in SPSS file
+# data = read.spss("s5Longfile_OLremoved.sav", use.value.labels = TRUE, to.data.frame = TRUE)
+  data = read.csv("s5Longfile_OLremoved.csv")
+#summary(data) 
+head(data)
+colnames(data)[1] <- "subject"
+
+#19,869 cols x 26 rows
+dim(data)
+
+#121 participants
+length(unique(data$subject))
+
+#Distance only
+  Ddata <- data[ which(data$estimate_type=='Distance'), ]
+  head(Ddata)
+  dim(Ddata)
+  length(unique(Ddata$subject))
+  hist(Ddata$subject_estimate)
+  range(Ddata$subject_estimate)
+
+#0 = Toogle
+#1 = World-Locked
+#2 = Screen-Locked 
+  
+Ddata$condition <- as.numeric(Ddata$condition)
+ DdataTog <- Ddata[which(Ddata$condition == 0),]
+ DdataSW <- Ddata[which(Ddata$condition > 0),]
+
+
+sessionInfo()
+```
+
+## Multilevel models
+### Est dist
+```{r}
+#Sanity check: Stim distance and estimated distance with random int for participants 
+Null.dist <- lmer(subject_estimate ~ 1 + stim_distance + (1|subject), data = DdataSW)
+coef(Null.dist)
+summary(Null.dist)
+
+#Convergence probs with stimuli distance as a random effect
+#7 unique stim distance
+unique(Ddata$stim_distance)
+
+Null.dist2 <- lmer(subject_estimate ~ 1 + stim_distance + (1 + stim_distance|subject), data = DdataSW)
+coef(Null.dist2)
+fixef(Null.dist2)
+ranef(Null.dist2)
+
+
+Null.cond <- lmer(subject_estimate ~ 1 + condition + (1|subject), 
+                  data = DdataSW)
+summary(Null.cond)
+
+#Stim distance and condition
+Model1.dist.cond <- lmer(subject_estimate ~ 1 + stim_distance*condition + 
+                         (1|subject), data = DdataSW)
+summary(Model1.dist.cond)
+
+plot_model(Model1.dist.cond, type = "pred", terms = "stim_distance")
+plot_model(Model1.dist.cond, type = "int", terms = "condition")
+tab_model(Model1.dist.cond, show.df = TRUE)
+
+#Model comparison
+anova(Null.dist, Null.cond, Model1.dist.cond)
+```
+
+### Ratio
+```{r}
+#Sanity check: Stim distance and estimated distance with random int for participants 
+Null.distr <- lmer(Ratio ~ 1 + stim_distance + (1|subject), data = DdataSW)
+coef(Null.distr)
+summary(Null.distr)
+
+#Convergence probs with stimuli distance as a random effect
+#7 unique stim distance
+unique(Ddata$stim_distance)
+
+Null.dist2r <- lmer(Ratio ~ 1 + stim_distance + (1 + stim_distance|subject), data = DdataSW)
+coef(Null.dist2r)
+fixef(Null.dist2r)
+ranef(Null.dist2r)
+
+
+Null.condr <- lmer(Ratio ~ 1 + condition + (1|subject), data = DdataSW)
+summary(Null.condr)
+
+#Stim distance and condition
+Model1.dist.condr <- lmer(Ratio ~ 1 + stim_distance*condition + (1|subject), data = DdataSW)
+summary(Model1.dist.condr)
+
+plot_model(Model1.dist.condr, type = "pred", terms = "stim_distance")
+plot_model(Model1.dist.condr, type = "int", terms = "condition")
+tab_model(Model1.dist.condr, show.df = TRUE)
+
+#Model comparison
+anova(Null.distr, Null.condr, Model1.dist.condr)
+```
+
+### Absolute error
+```{r}
+#Sanity check: Stim distance and estimated distance with random int for participants 
+Null.dist.ae <- lmer(Ratio ~ 1 + stim_distance + (1|subject), data = DdataSW)
+coef(Null.dist.ae)
+summary(Null.dist.ae)
+
+#Convergence probs with stimuli distance as a random effect
+#7 unique stim distance
+unique(Ddata$stim_distance)
+
+Null.dist2.ae <- lmer(AbsoluteError ~ 1 + stim_distance + (1 + stim_distance|subject), data = DdataSW)
+coef(Null.dist2.ae)
+fixef(Null.dist2.ae)
+ranef(Null.dist2.ae)
+
+
+Null.cond.ae <- lmer(AbsoluteError ~ 1 + condition + (1|subject), data = DdataSW)
+summary(Null.cond.ae)
+
+#Stim distance and condition
+Model1.dist.cond.ae <- lmer(AbsoluteError ~ 1 + stim_distance*condition + (1|subject), data = DdataSW)
+summary(Model1.dist.cond.ae)
+
+plot_model(Model1.dist.cond.ae, type = "pred", terms = "stim_distance")
+plot_model(Model1.dist.cond.ae, type = "int", terms = "condition")
+tab_model(Model1.dist.cond.ae, show.df = TRUE)
+
+#Model comparison
+anova(Null.dist.ae, Null.cond.ae, Model1.dist.cond.ae)
+```
+

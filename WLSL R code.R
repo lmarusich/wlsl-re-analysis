@@ -49,13 +49,13 @@ DdataSW <- Ddata[which(Ddata$condition > 0),]
 
 
 #check for normality
-DdataSW$predict <- predict(Y)
-DdataSW$resid <- DdataSW$subject_estimate - DdataSW$predict
-DdataSW$zresid <- (DdataSW$resid - mean(DdataSW$resid))/sd(DdataSW$resid)
-hist(DdataSW$zresid)
-
-#heteroscedasticity
-plot(DdataSW$zresid ~ DdataSW$stim_distance)
+# DdataSW$predict <- predict(Y)
+# DdataSW$resid <- DdataSW$subject_estimate - DdataSW$predict
+# DdataSW$zresid <- (DdataSW$resid - mean(DdataSW$resid))/sd(DdataSW$resid)
+# hist(DdataSW$zresid)
+# 
+# #heteroscedasticity
+# plot(DdataSW$zresid ~ DdataSW$stim_distance)
 #change stim_distance to other variables
 
 #random slope model
